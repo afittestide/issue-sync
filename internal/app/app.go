@@ -92,10 +92,13 @@ func (a *App) Init(ctx context.Context, owner, repo string) error {
 		}
 	}
 
-	// Default to placing .issues next to .git
+	// Default to placing .issues next to .git, unless GH_ISSUE_SYNC_DIR names
+	// an explicit location.
 	root := a.Root
-	if gitRoot := paths.FindGitRoot(root); gitRoot != "" {
-		root = gitRoot
+	if os.Getenv(paths.EnvIssuesDir) == "" {
+		if gitRoot := paths.FindGitRoot(root); gitRoot != "" {
+			root = gitRoot
+		}
 	}
 
 	p := paths.New(root)

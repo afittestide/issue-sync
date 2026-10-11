@@ -34,8 +34,21 @@ type Paths struct {
 	ProjectsPath   string
 }
 
+// IssuesDirPath returns the .issues directory for root, honoring
+// GH_ISSUE_SYNC_DIR when set. The env var names the .issues directory
+// itself and may be relative to root.
+func IssuesDirPath(root string) string {
+	if envDir := os.Getenv(EnvIssuesDir); envDir != "" {
+		if !filepath.IsAbs(envDir) {
+			return filepath.Join(root, envDir)
+		}
+		return envDir
+	}
+	return filepath.Join(root, IssuesDirName)
+}
+
 func New(root string) Paths {
-	issuesDir := filepath.Join(root, IssuesDirName)
+	issuesDir := IssuesDirPath(root)
 	syncDir := filepath.Join(issuesDir, SyncDirName)
 	originalsDir := filepath.Join(syncDir, OriginalsDirName)
 	openDir := filepath.Join(issuesDir, OpenDirName)
@@ -75,17 +88,22 @@ func (p Paths) EnsureLayout() error {
 // It first checks the GH_ISSUE_SYNC_DIR environment variable,
 // then walks upward from startDir until it finds .issues or hits a .git root.
 // Returns the directory containing .issues (not .issues itself), or empty string if not found.
+//
+// The returned value is meant to be fed back into New, so it must be the
+// root against which IssuesDirPath resolves the environment variable
+// without resolving it twice:
+//   - an absolute GH_ISSUE_SYNC_DIR ignores the root, so its parent is
+//     returned;
+//   - a relative value is resolved against the root inside New, so startDir
+//     itself is returned.
 func FindIssuesDir(startDir string) string {
-	// Check environment variable first
+	// Check environment variable first. The env var names the .issues
+	// directory itself and need not exist yet (init will create it).
 	if envDir := os.Getenv(EnvIssuesDir); envDir != "" {
 		if !filepath.IsAbs(envDir) {
-			envDir = filepath.Join(startDir, envDir)
+			return filepath.Clean(startDir)
 		}
-		// The env var points to the .issues directory itself
-		if info, err := os.Stat(envDir); err == nil && info.IsDir() {
-			return filepath.Dir(envDir)
-		}
-		return ""
+		return filepath.Dir(filepath.Clean(envDir))
 	}
 
 	// Walk upward looking for .issues

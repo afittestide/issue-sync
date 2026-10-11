@@ -95,6 +95,89 @@ func TestApplyMappingNoChange(t *testing.T) {
 	}
 }
 
+func TestInitHonorsEnvIssuesDir(t *testing.T) {
+	root := t.TempDir()
+	gitRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(gitRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	envDir := filepath.Join(root, "custom-issues")
+	t.Setenv(paths.EnvIssuesDir, envDir)
+
+	application := New(gitRoot, ghcli.ExecRunner{}, io.Discard, io.Discard)
+	if err := application.Init(context.Background(), "owner", "repo"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(envDir, paths.OpenDirName),
+		filepath.Join(envDir, paths.ClosedDirName),
+		filepath.Join(envDir, paths.SyncDirName),
+	} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("expected %s to exist: %v", dir, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("%s is not a directory", dir)
+		}
+	}
+	cfgPath := filepath.Join(envDir, paths.SyncDirName, paths.ConfigFileName)
+	if _, err := os.Stat(cfgPath); err != nil {
+		t.Fatalf("expected config at %s: %v", cfgPath, err)
+	}
+
+	if _, err := os.Stat(filepath.Join(gitRoot, paths.IssuesDirName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no .issues at git root, stat err = %v", err)
+	}
+}
+
+func TestInitHonorsRelativeEnvIssuesDir(t *testing.T) {
+	// Mirrors cmd/gh-issue-sync/main.go: root comes from FindIssuesDir(cwd)
+	// before App.Init runs. A relative GH_ISSUE_SYNC_DIR must resolve to the
+	// same location in both steps, without doubling.
+	base := t.TempDir()
+	gitRoot := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(gitRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(paths.EnvIssuesDir, filepath.Join("work", ".issues"))
+
+	root := paths.FindIssuesDir(gitRoot)
+	if root == "" {
+		t.Fatal("FindIssuesDir returned empty for relative env")
+	}
+	application := New(root, ghcli.ExecRunner{}, io.Discard, io.Discard)
+	if err := application.Init(context.Background(), "owner", "repo"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	wantIssues := filepath.Join(gitRoot, "work", ".issues")
+	for _, dir := range []string{
+		filepath.Join(wantIssues, paths.OpenDirName),
+		filepath.Join(wantIssues, paths.ClosedDirName),
+		filepath.Join(wantIssues, paths.SyncDirName),
+	} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("expected %s to exist, err = %v", dir, err)
+		}
+	}
+	cfgPath := filepath.Join(wantIssues, paths.SyncDirName, paths.ConfigFileName)
+	if _, err := os.Stat(cfgPath); err != nil {
+		t.Fatalf("expected config at %s: %v", cfgPath, err)
+	}
+
+	// The doubled path must not exist.
+	if _, err := os.Stat(filepath.Join(gitRoot, "work", "work")); !os.IsNotExist(err) {
+		t.Fatalf("relative env was resolved twice: %s exists", filepath.Join(gitRoot, "work", "work"))
+	}
+	if _, err := os.Stat(filepath.Join(gitRoot, paths.IssuesDirName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no .issues at git root, stat err = %v", err)
+	}
+}
+
 func TestNewIssueFromEditor(t *testing.T) {
 	root := t.TempDir()
 	p := paths.New(root)
